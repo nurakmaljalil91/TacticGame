@@ -9,7 +9,6 @@
 
 // Global variables for zoom
 float zoomLevel = 10.0f; // Initial zoom level
-const int gridSize = 10;
 
 // Function prototypes
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
@@ -18,23 +17,60 @@ const char* vertexShaderSource = R"(
 #version 330 core
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec2 aTexCoord;
+layout(location = 2) in vec3 aNormal;
+
 out vec2 TexCoord;
-uniform mat4 mvp;
+out vec3 Normal;
+out vec3 FragPos;
+
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+
 void main()
 {
-    gl_Position = mvp * vec4(aPos, 1.0);
+    FragPos = vec3(model * vec4(aPos, 1.0)); // World position of the fragment
+    Normal = mat3(transpose(inverse(model))) * aNormal; // Transform normals to world space
     TexCoord = aTexCoord;
+    gl_Position = projection * view * model * vec4(aPos, 1.0);
 }
 )";
 
 const char* fragmentShaderSource = R"(
 #version 330 core
 out vec4 FragColor;
+
 in vec2 TexCoord;
+in vec3 Normal;
+in vec3 FragPos;
+
 uniform sampler2D texture1;
+uniform vec3 lightPos; // Light position in world space
+uniform vec3 lightColor; // Light color
+uniform vec3 viewPos; // Camera position for specular lighting
+
 void main()
 {
-    FragColor = texture(texture1, TexCoord);
+    // Ambient lighting
+    float ambientStrength = 0.1;
+    vec3 ambient = ambientStrength * lightColor;
+
+    // Diffuse lighting
+    vec3 norm = normalize(Normal);
+    vec3 lightDir = normalize(lightPos - FragPos);
+    float diff = max(dot(norm, lightDir), 0.0);
+    vec3 diffuse = diff * lightColor;
+
+    // Specular lighting
+    float specularStrength = 0.5;
+    vec3 viewDir = normalize(viewPos - FragPos);
+    vec3 reflectDir = reflect(-lightDir, norm);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);
+    vec3 specular = specularStrength * spec * lightColor;
+
+    // Combine lighting
+    vec3 result = (ambient + diffuse + specular) * texture(texture1, TexCoord).rgb;
+    FragColor = vec4(result, 1.0);
 }
 )";
 
@@ -115,7 +151,7 @@ int main() {
         return -1;
     }
 
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Isometric Camera with Zoom", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(800, 600, "Isometric Map with Lighting", nullptr, nullptr);
     if (!window) {
         std::cerr << "Failed to create GLFW window" << std::endl;
         glfwTerminate();
@@ -135,43 +171,44 @@ int main() {
     // Set up scroll callback
     glfwSetScrollCallback(window, scroll_callback);
 
+    // Define vertices with normals
     float vertices[] = {
-            // Positions          // Texture Coords
+            // Positions          // Texture Coords  // Normals
             // Back face
-            -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
-            0.5f, -0.5f, -0.5f,  1.0f, 0.0f,
-            0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
-            -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,
+            -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f,  0.0f, -1.0f,
+            0.5f, -0.5f, -0.5f,  1.0f, 0.0f,  0.0f,  0.0f, -1.0f,
+            0.5f,  0.5f, -0.5f,  1.0f, 1.0f,  0.0f,  0.0f, -1.0f,
+            -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,  0.0f,  0.0f, -1.0f,
 
             // Front face
-            -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
-            0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
-            0.5f,  0.5f,  0.5f,  1.0f, 1.0f,
-            -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,
+            -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f,  0.0f,  1.0f,
+            0.5f, -0.5f,  0.5f,  1.0f, 0.0f,  0.0f,  0.0f,  1.0f,
+            0.5f,  0.5f,  0.5f,  1.0f, 1.0f,  0.0f,  0.0f,  1.0f,
+            -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,  0.0f,  0.0f,  1.0f,
 
             // Left face
-            -0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-            -0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
-            -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-            -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+            -0.5f,  0.5f,  0.5f,  1.0f, 0.0f, -1.0f,  0.0f,  0.0f,
+            -0.5f,  0.5f, -0.5f,  1.0f, 1.0f, -1.0f,  0.0f,  0.0f,
+            -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, -1.0f,  0.0f,  0.0f,
+            -0.5f, -0.5f,  0.5f,  0.0f, 0.0f, -1.0f,  0.0f,  0.0f,
 
             // Right face
-            0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-            0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
-            0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-            0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+            0.5f,  0.5f,  0.5f,  1.0f, 0.0f,  1.0f,  0.0f,  0.0f,
+            0.5f,  0.5f, -0.5f,  1.0f, 1.0f,  1.0f,  0.0f,  0.0f,
+            0.5f, -0.5f, -0.5f,  0.0f, 1.0f,  1.0f,  0.0f,  0.0f,
+            0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  1.0f,  0.0f,  0.0f,
 
             // Bottom face
-            -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-            0.5f, -0.5f, -0.5f,  1.0f, 1.0f,
-            0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
-            -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+            -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,  0.0f, -1.0f,  0.0f,
+            0.5f, -0.5f, -0.5f,  1.0f, 1.0f,  0.0f, -1.0f,  0.0f,
+            0.5f, -0.5f,  0.5f,  1.0f, 0.0f,  0.0f, -1.0f,  0.0f,
+            -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, -1.0f,  0.0f,
 
             // Top face
-            -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,
-            0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
-            0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-            -0.5f,  0.5f,  0.5f,  0.0f, 0.0f
+            -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,  0.0f,  1.0f,  0.0f,
+            0.5f,  0.5f, -0.5f,  1.0f, 1.0f,  0.0f,  1.0f,  0.0f,
+            0.5f,  0.5f,  0.5f,  1.0f, 0.0f,  0.0f,  1.0f,  0.0f,
+            -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,  0.0f,  1.0f,  0.0f
     };
 
     unsigned int indices[] = {
@@ -202,11 +239,17 @@ int main() {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    // Position attribute
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    // Texture coordinate attribute
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
+
+    // Normal attribute
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(5 * sizeof(float)));
+    glEnableVertexAttribArray(2);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
@@ -214,17 +257,22 @@ int main() {
     unsigned int shaderProgram = createShaderProgram(vertexShaderSource, fragmentShaderSource);
 
     // Load texture
-    unsigned int texture = loadTexture("resources/textures/texture_02.png");
+    unsigned int texture = loadTexture("resources/textures/texture_08.png");
 
     // Set up the MVP matrix for isometric view
-    glm::mat4 model = glm::mat4(1.0f); // Identity matrix
     glm::mat4 view = glm::lookAt(
             glm::vec3(2.0f, 2.0f, 2.0f), // Camera position (45 degrees on X and Y)
             glm::vec3(0.0f, 0.0f, 0.0f), // Look at the origin
             glm::vec3(0.0f, 1.0f, 0.0f)  // Up vector
     );
 
-    unsigned int mvpLocation = glGetUniformLocation(shaderProgram, "mvp");
+    // Light properties
+    glm::vec3 lightPos(10.0f, 10.0f, 10.0f); // Light position
+    glm::vec3 lightColor(1.0f, 1.0f, 1.0f); // White light
+    glm::vec3 viewPos = glm::vec3(2.0f, 2.0f, 2.0f); // Camera position
+
+    // Grid size
+    const int gridSize = 10;
 
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -238,6 +286,11 @@ int main() {
                 -10.0f, 10.0f          // Near, far
         );
 
+        // Pass light properties to the shader
+        glUniform3fv(glGetUniformLocation(shaderProgram, "lightPos"), 1, glm::value_ptr(lightPos));
+        glUniform3fv(glGetUniformLocation(shaderProgram, "lightColor"), 1, glm::value_ptr(lightColor));
+        glUniform3fv(glGetUniformLocation(shaderProgram, "viewPos"), 1, glm::value_ptr(viewPos));
+
         // Bind the texture
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, texture);
@@ -250,11 +303,11 @@ int main() {
                 glm::mat4 model = glm::mat4(1.0f);
                 model = glm::translate(model, glm::vec3(i - gridSize / 2.0f, 0.0f, j - gridSize / 2.0f));
 
-                // Recalculate the MVP matrix for this cube
-                glm::mat4 mvp = projection * view * model;
-
                 // Pass the MVP matrix
-                glUniformMatrix4fv(mvpLocation, 1, GL_FALSE, glm::value_ptr(mvp));
+                glm::mat4 mvp = projection * view * model;
+                glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(model));
+                glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
+                glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
                 // Draw the cube
                 glBindVertexArray(VAO);
