@@ -7,6 +7,12 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
+// Global variables for zoom
+float zoomLevel = 2.0f; // Initial zoom level
+
+// Function prototypes
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
+
 const char* vertexShaderSource = R"(
 #version 330 core
 layout(location = 0) in vec3 aPos;
@@ -108,7 +114,7 @@ int main() {
         return -1;
     }
 
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Textured Cube", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(800, 600, "Isometric Camera with Zoom", nullptr, nullptr);
     if (!window) {
         std::cerr << "Failed to create GLFW window" << std::endl;
         glfwTerminate();
@@ -124,6 +130,9 @@ int main() {
 
     glViewport(0, 0, 800, 600);
     glEnable(GL_DEPTH_TEST);
+
+    // Set up scroll callback
+    glfwSetScrollCallback(window, scroll_callback);
 
     float vertices[] = {
             // Positions          // Texture Coords
@@ -206,15 +215,13 @@ int main() {
     // Load texture
     unsigned int texture = loadTexture("resources/textures/texture_08.png");
 
-    // Set up the MVP matrix
-    glm::mat4 model = glm::mat4(1.0f);
+    // Set up the MVP matrix for isometric view
+    glm::mat4 model = glm::mat4(1.0f); // Identity matrix
     glm::mat4 view = glm::lookAt(
-            glm::vec3(2.0f, 2.0f, 2.0f), // Camera position
+            glm::vec3(2.0f, 2.0f, 2.0f), // Camera position (45 degrees on X and Y)
             glm::vec3(0.0f, 0.0f, 0.0f), // Look at the origin
             glm::vec3(0.0f, 1.0f, 0.0f)  // Up vector
     );
-    glm::mat4 projection = glm::ortho(-2.0f, 2.0f, -2.0f, 2.0f, -10.0f, 10.0f);
-    glm::mat4 mvp = projection * view * model;
 
     unsigned int mvpLocation = glGetUniformLocation(shaderProgram, "mvp");
 
@@ -223,13 +230,23 @@ int main() {
 
         glUseProgram(shaderProgram);
 
+        // Update the projection matrix based on zoom level
+        glm::mat4 projection = glm::ortho(
+                -zoomLevel, zoomLevel, // Left, right
+                -zoomLevel, zoomLevel, // Bottom, top
+                -10.0f, 10.0f          // Near, far
+        );
+
+        // Recalculate the MVP matrix
+        glm::mat4 mvp = projection * view * model;
+
+        // Pass the MVP matrix
+        glUniformMatrix4fv(mvpLocation, 1, GL_FALSE, glm::value_ptr(mvp));
+
         // Bind the texture
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, texture);
         glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
-
-        // Pass the MVP matrix
-        glUniformMatrix4fv(mvpLocation, 1, GL_FALSE, glm::value_ptr(mvp));
 
         // Draw the cube
         glBindVertexArray(VAO);
@@ -246,4 +263,10 @@ int main() {
 
     glfwTerminate();
     return 0;
+}
+
+// Scroll callback for zooming
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
+    zoomLevel -= (float)yoffset * 0.1f; // Adjust zoom level
+    if (zoomLevel < 0.1f) zoomLevel = 0.1f; // Prevent zooming too close
 }
