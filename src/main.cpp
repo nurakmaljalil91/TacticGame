@@ -10,8 +10,9 @@ const int GRID_SIZE = 10;
 const float TILE_SIZE = 1.0f;
 
 // Camera Settings
-float cameraAngle = 45.0f; // Default angle
-float cameraDistance = 15.0f; // Camera distance from center
+float cameraAngle = 45.0f; // Y-axis rotation for isometric
+float cameraHeight = 15.0f; // Height above the grid
+float cameraDistance = 15.0f; // Distance from center
 
 void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (action == GLFW_PRESS || action == GLFW_REPEAT) {
@@ -25,13 +26,15 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 }
 
 
+// Generates an isometric view matrix
 glm::mat4 GetCameraViewMatrix() {
     float angleRad = glm::radians(cameraAngle);
     glm::vec3 cameraPos = glm::vec3(
             cos(angleRad) * cameraDistance,
-            10.0f,
+            cameraHeight,
             sin(angleRad) * cameraDistance
     );
+
     return glm::lookAt(cameraPos, glm::vec3(GRID_SIZE / 2.0f, 0.0f, GRID_SIZE / 2.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 }
 
@@ -120,10 +123,9 @@ void RenderGrid(unsigned int shaderProgram, unsigned int VAO) {
 }
 
 int main() {
-    // Initialize GLFW
     if (!glfwInit()) return -1;
 
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Tactical RPG", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(800, 600, "Isometric Tactical RPG", nullptr, nullptr);
     if (!window) {
         glfwTerminate();
         return -1;
@@ -153,18 +155,18 @@ int main() {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    // Camera Projection
+    // Projection Matrix (for isometric perspective)
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
-
 
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glm::mat4 view = GetCameraViewMatrix(); // Get updated camera matrix
-        
+
         glUseProgram(shaderProgram);
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, &projection[0][0]);
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, &view[0][0]);
+
 
         RenderGrid(shaderProgram, VAO);
 
