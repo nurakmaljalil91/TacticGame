@@ -10,9 +10,11 @@ const int GRID_SIZE = 10;
 const float TILE_SIZE = 1.0f;
 
 // Camera Settings
-float cameraAngle = 45.0f; // Y-axis rotation for isometric
-float cameraHeight = 15.0f; // Height above the grid
-float cameraDistance = 15.0f; // Distance from center
+float cameraAngle = 45.0f; // Rotation around Y-axis
+float cameraHeight = 10.0f; // Height above the grid
+float cameraDistance = 15.0f; // Distance from grid center
+const float minZoom = 5.0f;  // Minimum zoom distance
+const float maxZoom = 25.0f; // Maximum zoom distance
 
 void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (action == GLFW_PRESS || action == GLFW_REPEAT) {
@@ -22,11 +24,19 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
         if (key == GLFW_KEY_RIGHT) {
             cameraAngle -= 5.0f; // Rotate right
         }
+        if (key == GLFW_KEY_UP) {
+            cameraDistance -= 1.0f; // Zoom in
+            if (cameraDistance < minZoom) cameraDistance = minZoom;
+        }
+        if (key == GLFW_KEY_DOWN) {
+            cameraDistance += 1.0f; // Zoom out
+            if (cameraDistance > maxZoom) cameraDistance = maxZoom;
+        }
     }
 }
 
 
-// Generates an isometric view matrix
+// Generates an isometric view matrix with zoom
 glm::mat4 GetCameraViewMatrix() {
     float angleRad = glm::radians(cameraAngle);
     glm::vec3 cameraPos = glm::vec3(
