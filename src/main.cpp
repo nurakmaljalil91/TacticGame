@@ -13,10 +13,16 @@
 // --------------------------------------------------------------------------------
 // Global variables
 // --------------------------------------------------------------------------------
-float zoomLevel = 10.0f;
-// Start the camera angled above the origin
+
+// We keep the camera fixed in an isometric position
 glm::vec3 cameraPos(2.0f, 2.0f, 2.0f);
-float cameraMoveSpeed = 0.05f;
+
+// We no longer move the camera with WASD; the user controls the player's sphere
+// We'll track the player's position in (x, y, z) world space.
+glm::vec3 playerPos(0.0f);  // We'll set an initial position once we know the grid
+
+float zoomLevel = 10.0f;
+float playerMoveSpeed = 0.02f;  // Movement speed for the sphere
 
 // Forward declarations
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
@@ -28,9 +34,9 @@ unsigned int loadTexture(const char* path);
 // --------------------------------------------------------------------------------
 const char* vertexShaderSource = R"(
 #version 330 core
-layout(location = 0) in vec3 aPos;     // Position
+layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec2 aTexCoord;
-layout(location = 2) in vec3 aNormal;  // Normal
+layout(location = 2) in vec3 aNormal;
 
 out vec2 TexCoord;
 out vec3 Normal;
@@ -44,13 +50,13 @@ void main()
 {
     FragPos = vec3(model * vec4(aPos, 1.0));
     Normal = mat3(transpose(inverse(model))) * aNormal;
-    TexCoord = aTexCoord; // We'll just pass it through if we need a texture
+    TexCoord = aTexCoord;
     gl_Position = projection * view * model * vec4(aPos, 1.0);
 }
 )";
 
 // --------------------------------------------------------------------------------
-// Fragment Shader (with simple sky lighting + optional solid color)
+// Fragment Shader (with "sky" lighting + optional solid color)
 // --------------------------------------------------------------------------------
 const char* fragmentShaderSource = R"(
 #version 330 core
@@ -69,9 +75,9 @@ uniform vec3 viewPos;
 uniform vec3 skyColor;
 uniform float skyStrength;
 
-// An optional solidColor for items that don't need texturing
+// If true, ignore texture and use solidColor
+uniform bool useSolidColor;
 uniform vec3 solidColor;
-uniform bool useSolidColor;  // if true, ignore texture and use solidColor
 
 void main()
 {
@@ -93,13 +99,13 @@ void main()
     float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);
     vec3 specular = specularStrength * spec * lightColor;
 
-    // Combine lighting
+    // Combine them
     vec3 lighting = ambient + diffuse + specular;
 
-    // If "useSolidColor" is true, we ignore the texture and just tint with solidColor
     if(useSolidColor) {
         FragColor = vec4(lighting * solidColor, 1.0);
     } else {
+        // Use a texture
         vec3 texColor = texture(texture1, TexCoord).rgb;
         FragColor = vec4(lighting * texColor, 1.0);
     }
@@ -116,7 +122,7 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
 }
 
 // --------------------------------------------------------------------------------
-// Compile & link shader helpers
+// Helper: Compile & link shaders
 // --------------------------------------------------------------------------------
 unsigned int compileShader(const char* source, GLenum type) {
     unsigned int shader = glCreateShader(type);
@@ -154,7 +160,7 @@ unsigned int createShaderProgram(const char* vertexSrc, const char* fragmentSrc)
 }
 
 // --------------------------------------------------------------------------------
-// Load texture
+// Load texture from file
 // --------------------------------------------------------------------------------
 unsigned int loadTexture(const char* path) {
     unsigned int textureID;
@@ -163,10 +169,7 @@ unsigned int loadTexture(const char* path) {
     int width, height, nrChannels;
     unsigned char* data = stbi_load(path, &width, &height, &nrChannels, 0);
     if (data) {
-        GLenum format = GL_RGB;
-        if (nrChannels == 1)      format = GL_RED;
-        else if (nrChannels == 3) format = GL_RGB;
-        else if (nrChannels == 4) format = GL_RGBA;
+        GLenum format = (nrChannels == 4) ? GL_RGBA : GL_RGB;
 
         glBindTexture(GL_TEXTURE_2D, textureID);
         glTexImage2D(GL_TEXTURE_2D, 0, format,
@@ -186,44 +189,38 @@ unsigned int loadTexture(const char* path) {
 }
 
 // --------------------------------------------------------------------------------
-// Create a UV-sphere as a triangle mesh
-//   - radius: the sphere radius
-//   - sectorCount: how many slices around the Y-axis
-//   - stackCount: how many stacks from bottom to top
+// Generate a UV-sphere for the "player" object
 // --------------------------------------------------------------------------------
 void createSphereVAO(float radius, int sectorCount, int stackCount,
                      unsigned int &VAO, unsigned int &VBO, unsigned int &EBO)
 {
-    std::vector<float> vertices;   // will hold (x, y, z,  texU, texV,  nx, ny, nz)
+    std::vector<float> vertices; // (x, y, z, u, v, nx, ny, nz)
     std::vector<unsigned int> indices;
 
     float lengthInv = 1.0f / radius;
 
-    // Generate vertex data
-    // ----------------------------------
+    // Build the sphere vertices
     for(int i = 0; i <= stackCount; ++i) {
-        // stackAngle goes from +PI/2 (top) down to -PI/2 (bottom)
+        // from +PI/2 down to -PI/2
         float stackAngle =  (float)M_PI/2.0f - (float)i * (float)M_PI / (float)stackCount;
-        float xy = radius * cosf(stackAngle);  // r * cos(u)
-        float y  = radius * sinf(stackAngle);  // r * sin(u)
+        float xy = radius * cosf(stackAngle);
+        float y  = radius * sinf(stackAngle);
 
         for(int j = 0; j <= sectorCount; ++j) {
             float sectorAngle = (float)j * 2.0f * (float)M_PI / (float)sectorCount; // 0..2PI
 
-            // vertex position (x, y, z)
             float x = xy * cosf(sectorAngle);
             float z = xy * sinf(sectorAngle);
 
-            // normalized vector for the normal
+            // normalized normal
             float nx = x * lengthInv;
             float ny = y * lengthInv;
             float nz = z * lengthInv;
 
-            // some basic texture coords (u, v) between [0,1]
+            // basic tex coords
             float u = (float)j / (float)sectorCount;
             float v = (float)i / (float)stackCount;
 
-            // push back
             vertices.push_back(x);
             vertices.push_back(y);
             vertices.push_back(z);
@@ -235,24 +232,18 @@ void createSphereVAO(float radius, int sectorCount, int stackCount,
         }
     }
 
-    // Generate index data
-    // ----------------------------------
-    // Each stack has sectorCount "quads", each quad is two triangles
-    // (i, j) => i-th stack, j-th sector
+    // Build indices
     int k1, k2;
     for(int i = 0; i < stackCount; ++i) {
         k1 = i * (sectorCount + 1);
         k2 = k1 + sectorCount + 1;
         for(int j = 0; j < sectorCount; ++j, ++k1, ++k2) {
-            // 2 triangles per sector
             if(i != 0) {
-                // triangle 1
                 indices.push_back(k1);
                 indices.push_back(k2);
                 indices.push_back(k1 + 1);
             }
             if(i != (stackCount-1)) {
-                // triangle 2
                 indices.push_back(k1 + 1);
                 indices.push_back(k2);
                 indices.push_back(k2 + 1);
@@ -260,7 +251,7 @@ void createSphereVAO(float radius, int sectorCount, int stackCount,
         }
     }
 
-    // Create VAO/VBO/EBO
+    // Create VAO
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     glGenBuffers(1, &EBO);
@@ -277,18 +268,17 @@ void createSphereVAO(float radius, int sectorCount, int stackCount,
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int),
                  indices.data(), GL_STATIC_DRAW);
 
-    // Set vertex attribute pointers
-    // layout (location=0): position
+    // Positions
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float),
                           (void*)0);
     glEnableVertexAttribArray(0);
 
-    // layout (location=1): texture coords
+    // Tex coords
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float),
                           (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    // layout (location=2): normal
+    // Normals
     glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float),
                           (void*)(5 * sizeof(float)));
     glEnableVertexAttribArray(2);
@@ -296,6 +286,9 @@ void createSphereVAO(float radius, int sectorCount, int stackCount,
     glBindVertexArray(0);
 }
 
+// --------------------------------------------------------------------------------
+// Main
+// --------------------------------------------------------------------------------
 int main() {
     // Init GLFW
     if (!glfwInit()) {
@@ -303,7 +296,7 @@ int main() {
         return -1;
     }
 
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Isometric + Sphere Player", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(800, 600, "Isometric + Player Movement", nullptr, nullptr);
     if (!window) {
         std::cerr << "Failed to create window\n";
         glfwTerminate();
@@ -322,54 +315,53 @@ int main() {
     // Grey background
     glClearColor(0.7f, 0.7f, 0.7f, 1.0f);
 
-    // Scroll callback for zoom
+    // Use scroll to zoom
     glfwSetScrollCallback(window, scroll_callback);
 
-    // Build our shaders & program
+    // Build shader program
     unsigned int shaderProgram = createShaderProgram(vertexShaderSource, fragmentShaderSource);
 
-    // ----------------------------------
-    // 1) Create the cube geometry (same as earlier)
-    // ----------------------------------
+    // --------------------------------------------------------------------------------
+    // Create the cubes (for the grid)
+    // --------------------------------------------------------------------------------
     float cubeVertices[] = {
-            // positions            // tex coords // normals
+            // positions           // tex coords  // normals
             // Back face
-            -0.5f, -0.5f, -0.5f,   0.f, 0.f,     0.f, 0.f, -1.f,
-            0.5f, -0.5f, -0.5f,   1.f, 0.f,     0.f, 0.f, -1.f,
-            0.5f,  0.5f, -0.5f,   1.f, 1.f,     0.f, 0.f, -1.f,
-            -0.5f,  0.5f, -0.5f,   0.f, 1.f,     0.f, 0.f, -1.f,
+            -0.5f, -0.5f, -0.5f,   0.f, 0.f,      0.f, 0.f, -1.f,
+            0.5f, -0.5f, -0.5f,   1.f, 0.f,      0.f, 0.f, -1.f,
+            0.5f,  0.5f, -0.5f,   1.f, 1.f,      0.f, 0.f, -1.f,
+            -0.5f,  0.5f, -0.5f,   0.f, 1.f,      0.f, 0.f, -1.f,
 
             // Front face
-            -0.5f, -0.5f,  0.5f,   0.f, 0.f,     0.f, 0.f,  1.f,
-            0.5f, -0.5f,  0.5f,   1.f, 0.f,     0.f, 0.f,  1.f,
-            0.5f,  0.5f,  0.5f,   1.f, 1.f,     0.f, 0.f,  1.f,
-            -0.5f,  0.5f,  0.5f,   0.f, 1.f,     0.f, 0.f,  1.f,
+            -0.5f, -0.5f,  0.5f,   0.f, 0.f,      0.f, 0.f,  1.f,
+            0.5f, -0.5f,  0.5f,   1.f, 0.f,      0.f, 0.f,  1.f,
+            0.5f,  0.5f,  0.5f,   1.f, 1.f,      0.f, 0.f,  1.f,
+            -0.5f,  0.5f,  0.5f,   0.f, 1.f,      0.f, 0.f,  1.f,
 
             // Left face
-            -0.5f,  0.5f,  0.5f,   1.f, 0.f,    -1.f, 0.f,  0.f,
-            -0.5f,  0.5f, -0.5f,   1.f, 1.f,    -1.f, 0.f,  0.f,
-            -0.5f, -0.5f, -0.5f,   0.f, 1.f,    -1.f, 0.f,  0.f,
-            -0.5f, -0.5f,  0.5f,   0.f, 0.f,    -1.f, 0.f,  0.f,
+            -0.5f,  0.5f,  0.5f,   1.f, 0.f,     -1.f, 0.f,  0.f,
+            -0.5f,  0.5f, -0.5f,   1.f, 1.f,     -1.f, 0.f,  0.f,
+            -0.5f, -0.5f, -0.5f,   0.f, 1.f,     -1.f, 0.f,  0.f,
+            -0.5f, -0.5f,  0.5f,   0.f, 0.f,     -1.f, 0.f,  0.f,
 
             // Right face
-            0.5f,  0.5f,  0.5f,   1.f, 0.f,     1.f, 0.f,  0.f,
-            0.5f,  0.5f, -0.5f,   1.f, 1.f,     1.f, 0.f,  0.f,
-            0.5f, -0.5f, -0.5f,   0.f, 1.f,     1.f, 0.f,  0.f,
-            0.5f, -0.5f,  0.5f,   0.f, 0.f,     1.f, 0.f,  0.f,
+            0.5f,  0.5f,  0.5f,   1.f, 0.f,      1.f, 0.f,  0.f,
+            0.5f,  0.5f, -0.5f,   1.f, 1.f,      1.f, 0.f,  0.f,
+            0.5f, -0.5f, -0.5f,   0.f, 1.f,      1.f, 0.f,  0.f,
+            0.5f, -0.5f,  0.5f,   0.f, 0.f,      1.f, 0.f,  0.f,
 
             // Bottom face
-            -0.5f, -0.5f, -0.5f,   0.f, 1.f,     0.f, -1.f, 0.f,
-            0.5f, -0.5f, -0.5f,   1.f, 1.f,     0.f, -1.f, 0.f,
-            0.5f, -0.5f,  0.5f,   1.f, 0.f,     0.f, -1.f, 0.f,
-            -0.5f, -0.5f,  0.5f,   0.f, 0.f,     0.f, -1.f, 0.f,
+            -0.5f, -0.5f, -0.5f,   0.f, 1.f,      0.f, -1.f, 0.f,
+            0.5f, -0.5f, -0.5f,   1.f, 1.f,      0.f, -1.f, 0.f,
+            0.5f, -0.5f,  0.5f,   1.f, 0.f,      0.f, -1.f, 0.f,
+            -0.5f, -0.5f,  0.5f,   0.f, 0.f,      0.f, -1.f, 0.f,
 
             // Top face
-            -0.5f,  0.5f, -0.5f,   0.f, 1.f,     0.f,  1.f, 0.f,
-            0.5f,  0.5f, -0.5f,   1.f, 1.f,     0.f,  1.f, 0.f,
-            0.5f,  0.5f,  0.5f,   1.f, 0.f,     0.f,  1.f, 0.f,
-            -0.5f,  0.5f,  0.5f,   0.f, 0.f,     0.f,  1.f, 0.f
+            -0.5f,  0.5f, -0.5f,   0.f, 1.f,      0.f,  1.f, 0.f,
+            0.5f,  0.5f, -0.5f,   1.f, 1.f,      0.f,  1.f, 0.f,
+            0.5f,  0.5f,  0.5f,   1.f, 0.f,      0.f,  1.f, 0.f,
+            -0.5f,  0.5f,  0.5f,   0.f, 0.f,      0.f,  1.f, 0.f
     };
-
     unsigned int cubeIndices[] = {
             0, 1, 2, 2, 3, 0,
             4, 5, 6, 6, 7, 4,
@@ -393,105 +385,111 @@ int main() {
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cubeIndices), cubeIndices, GL_STATIC_DRAW);
 
     // Position
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float),
-                          (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
     // Texture
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float),
-                          (void*)(3 * sizeof(float)));
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3*sizeof(float)));
     glEnableVertexAttribArray(1);
     // Normal
-    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float),
-                          (void*)(5 * sizeof(float)));
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(5*sizeof(float)));
     glEnableVertexAttribArray(2);
 
     glBindVertexArray(0);
 
-    // Load a texture for the cubes
+    // Load texture for cubes
     unsigned int textureForCubes = loadTexture("resources/textures/texture_08.png");
 
-    // ----------------------------------
-    // 2) Create the sphere for the "player"
-    // ----------------------------------
+    // --------------------------------------------------------------------------------
+    // Create the sphere (player)
+    // --------------------------------------------------------------------------------
     unsigned int sphereVAO, sphereVBO, sphereEBO;
     float sphereRadius = 0.3f;
     int sectors = 16;
     int stacks  = 16;
     createSphereVAO(sphereRadius, sectors, stacks, sphereVAO, sphereVBO, sphereEBO);
 
-    // Light and "sky" settings
+    // We'll place the sphere in the middle of the map to start
+    // Suppose the map is a 10x10 grid, each cell around the origin (like your code).
+    const int gridSize = 10;
+    // Let's place the player around the center: e.g. x=3, z=2
+    // The top of each cube is y=+0.5 from that cell center
+    playerPos.x = (3 - gridSize / 2.0f);
+    playerPos.y = 0.5f + sphereRadius; // resting on top
+    playerPos.z = (2 - gridSize / 2.0f);
+
+    // Light, sky
     glm::vec3 lightPos(0.0f, 20.0f, 0.0f);
     glm::vec3 lightColor(1.0f, 1.0f, 1.0f);
     glm::vec3 skyColor(0.5f, 0.7f, 1.0f);
     float skyStrength = 0.2f;
 
-    // Grid size
-    const int gridSize = 10;
-
     while (!glfwWindowShouldClose(window)) {
-        // -- INPUT (WASD) --
+        // --- INPUT: Use WASD to move the player sphere, NOT the camera ---
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-            cameraPos.y += cameraMoveSpeed;
+            // Move "up" => decrease Z
+            playerPos.z -= playerMoveSpeed;
         }
         if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-            cameraPos.y -= cameraMoveSpeed;
+            // Move "down" => increase Z
+            playerPos.z += playerMoveSpeed;
         }
         if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-            cameraPos.x -= cameraMoveSpeed;
+            // Move "left" => decrease X
+            playerPos.x -= playerMoveSpeed;
         }
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-            cameraPos.x += cameraMoveSpeed;
+            // Move "right" => increase X
+            playerPos.x += playerMoveSpeed;
         }
 
-        // -- RENDER --
+        // --- RENDER ---
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Build view + ortho projection for isometric
+        // Build view matrix: camera is fixed
         glm::mat4 view = glm::lookAt(
                 cameraPos,
                 glm::vec3(0.0f, 0.0f, 0.0f),
                 glm::vec3(0.0f, 1.0f, 0.0f)
         );
 
+        // Orthographic projection => isometric style
         glm::mat4 projection = glm::ortho(
                 -zoomLevel, zoomLevel,
                 -zoomLevel, zoomLevel,
                 -10.f, 10.f
         );
 
-        // Use our shader
+        // Use our main shader
         glUseProgram(shaderProgram);
 
-        // Update common uniforms
+        // Common uniforms
         glUniform3fv(glGetUniformLocation(shaderProgram, "lightPos"), 1, glm::value_ptr(lightPos));
         glUniform3fv(glGetUniformLocation(shaderProgram, "lightColor"), 1, glm::value_ptr(lightColor));
         glUniform3fv(glGetUniformLocation(shaderProgram, "viewPos"), 1, glm::value_ptr(cameraPos));
         glUniform3fv(glGetUniformLocation(shaderProgram, "skyColor"), 1, glm::value_ptr(skyColor));
         glUniform1f(glGetUniformLocation(shaderProgram, "skyStrength"), skyStrength);
 
-        // We'll pass the "useSolidColor" uniform = false for cubes, true for the sphere
-        int useSolidLoc = glGetUniformLocation(shaderProgram, "useSolidColor");
+        int useSolidLoc   = glGetUniformLocation(shaderProgram, "useSolidColor");
         int solidColorLoc = glGetUniformLocation(shaderProgram, "solidColor");
 
         // Pass view & projection
-        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"),       1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
-        // 3) Draw the grid of cubes
+        // 1) Draw the grid of cubes
         glBindVertexArray(cubeVAO);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, textureForCubes);
         glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
 
-        // For cubes, we use the texture (not solid color)
-        glUniform1i(useSolidLoc, 0);
-
+        glUniform1i(useSolidLoc, 0);  // Use texture, not solid color
         for (int i = 0; i < gridSize; ++i) {
             for (int j = 0; j < gridSize; ++j) {
                 glm::mat4 model(1.0f);
+                // Each cell is placed around (i - gridSize/2, j - gridSize/2)
                 model = glm::translate(model, glm::vec3(
                         i - gridSize / 2.0f,
-                        0.0f,  // each cube extends from y=-0.5 to +0.5
+                        0.0f,
                         j - gridSize / 2.0f
                 ));
                 glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(model));
@@ -500,32 +498,26 @@ int main() {
             }
         }
 
-        // 4) Draw the "player" sphere on top of one cube
+        // 2) Draw the player sphere
         {
-            // Example: put it at grid coords (3,2)
-            // The top of a cube is y=+0.5 from its center.
-            // We'll place the center of the sphere at y= 0.5 + sphereRadius
-            float targetX = 3 - gridSize / 2.0f;
-            float targetZ = 2 - gridSize / 2.0f;
-            float aboveY = 0.5f + sphereRadius;
-
             glm::mat4 model(1.0f);
-            model = glm::translate(model, glm::vec3(targetX, aboveY, targetZ));
+            model = glm::translate(model, playerPos);
+
+            // If you want the sphere to rotate, you can add rotation here.
+            // But for a simple "marker", no rotation is needed.
 
             glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(model));
 
             // Use a solid color
             glUniform1i(useSolidLoc, 1);
-            glm::vec3 playerColor(1.0f, 0.2f, 0.2f); // a red-ish sphere
+            glm::vec3 playerColor(1.0f, 0.2f, 0.2f); // e.g. red
             glUniform3fv(solidColorLoc, 1, glm::value_ptr(playerColor));
 
             glBindVertexArray(sphereVAO);
-            // Indices used: each "stack band" has sectorCount * 2 triangles => 6 indices per sector,
-            // total = 6 * sectorCount * stackCount. But we can just pass the size from the EBO:
-            // we know createSphereVAO put all in an EBO. Let’s get the index count:
+
+            // Typically # of indices for a sphere: 6 * (sectors) * (stacks-1)
+            // We used 'sectors=16' and 'stacks=16' => 6 * 16 * (16-1) = 6 * 16 * 15 = 1440
             int sphereIndexCount = 6 * sectors * (stacks - 1);
-            // Actually the formula can vary with how we handle the poles, but typically:
-            // 6*(sectors)*(stacks-1). Or we can store the size in a variable. Let's do:
             glDrawElements(GL_TRIANGLES, sphereIndexCount, GL_UNSIGNED_INT, 0);
         }
 
