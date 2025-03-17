@@ -34,6 +34,9 @@ include_directories(${RAPIDJSON_PATH}/include)
 set(STB_IMAGE_PATH vendors/stb)
 include_directories(${STB_IMAGE_PATH})
 
+# add resources folder
+file(COPY src/resources DESTINATION ${CMAKE_BINARY_DIR})
+
 add_executable(TacticGame
         src/main.cpp
         ${GLAD_PATH}/src/glad.c
