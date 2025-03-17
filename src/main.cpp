@@ -8,7 +8,8 @@
 #include "stb_image.h"
 
 // Global variables for zoom
-float zoomLevel = 2.0f; // Initial zoom level
+float zoomLevel = 10.0f; // Initial zoom level
+const int gridSize = 10;
 
 // Function prototypes
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
@@ -213,7 +214,7 @@ int main() {
     unsigned int shaderProgram = createShaderProgram(vertexShaderSource, fragmentShaderSource);
 
     // Load texture
-    unsigned int texture = loadTexture("resources/textures/texture_08.png");
+    unsigned int texture = loadTexture("resources/textures/texture_02.png");
 
     // Set up the MVP matrix for isometric view
     glm::mat4 model = glm::mat4(1.0f); // Identity matrix
@@ -237,20 +238,29 @@ int main() {
                 -10.0f, 10.0f          // Near, far
         );
 
-        // Recalculate the MVP matrix
-        glm::mat4 mvp = projection * view * model;
-
-        // Pass the MVP matrix
-        glUniformMatrix4fv(mvpLocation, 1, GL_FALSE, glm::value_ptr(mvp));
-
         // Bind the texture
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, texture);
         glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
 
-        // Draw the cube
-        glBindVertexArray(VAO);
-        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+        // Draw the grid of cubes
+        for (int i = 0; i < gridSize; ++i) {
+            for (int j = 0; j < gridSize; ++j) {
+                // Calculate the position of the cube in the grid
+                glm::mat4 model = glm::mat4(1.0f);
+                model = glm::translate(model, glm::vec3(i - gridSize / 2.0f, 0.0f, j - gridSize / 2.0f));
+
+                // Recalculate the MVP matrix for this cube
+                glm::mat4 mvp = projection * view * model;
+
+                // Pass the MVP matrix
+                glUniformMatrix4fv(mvpLocation, 1, GL_FALSE, glm::value_ptr(mvp));
+
+                // Draw the cube
+                glBindVertexArray(VAO);
+                glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+            }
+        }
 
         glfwSwapBuffers(window);
         glfwPollEvents();
