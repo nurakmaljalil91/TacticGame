@@ -40,6 +40,10 @@ file(COPY src/resources DESTINATION ${CMAKE_BINARY_DIR})
 add_executable(TacticGame
         src/main.cpp
         ${GLAD_PATH}/src/glad.c
+        src/Camera.cpp
+        src/Camera.h
+        src/Shader.cpp
+        src/Shader.h
 )
 
 # add link libraries
